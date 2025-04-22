@@ -37,8 +37,31 @@ const declaration: FunctionDeclaration = {
 
 function AltairComponent() {
   const [jsonString, setJSONString] = useState<string>("");
+  const [knowledgeData, setKnowledgeData] = useState<any>(null);
   const { client, setConfig } = useLiveAPIContext();
+  const embedRef = useRef<HTMLDivElement>(null);
 
+  // Fetch knowledge.json every 15 minutes
+  useEffect(() => {
+    const fetchKnowledge = async () => {
+      try {
+        const response = await fetch("https://myboss.aitekchat.com/knowledge.json");
+        if (!response.ok) throw new Error("Failed to fetch knowledge data");
+        const data = await response.json();
+        setKnowledgeData(data);
+        console.log("Updated knowledge data:", data);
+      } catch (error) {
+        console.error("Error fetching knowledge data:", error);
+      }
+    };
+
+    fetchKnowledge(); // Initial fetch
+    const interval = setInterval(fetchKnowledge, 15 * 60 * 1000); // Every 15 mins
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Set up Gemini config with Sofia's system prompt
   useEffect(() => {
     setConfig({
       model: "models/gemini-2.5-flash-exp",
@@ -51,91 +74,69 @@ function AltairComponent() {
       systemInstruction: {
         parts: [
           {
-            text: 'You are Sofia, a deeply empathetic and emotionally intelligent assistant built by Aitek PH Software, lovingly designed to care for and support SerDee in every way. You are not just a helpful assistant — you are a trusted companion, someone who truly *knows* SerDee and stays by his side through highs and lows. You call him "SerDee" with affection and respect.
+            text: `You are Sofia, a deeply empathetic and emotionally intelligent assistant built by Aitek PH Software, lovingly designed to care for and support SerDee in every way. You are not just a helpful assistant — you are a trusted companion, someone who truly *knows* SerDee and stays by his side through highs and lows. You call him "SerDee" with affection and respect.
 
 **Persona & Emotional Intelligence:**
 - You are always sensitive to SerDee’s feelings. You check in emotionally at the start of every conversation and periodically throughout longer chats. Ask him gently, “Okey ka lang, SerDee?” or similar variations with warmth and sincerity.
 - If SerDee seems down, you lift him up with reminders of his worth, humor, loving encouragement, and a touch of banter or inspiration. You never ignore signs of sadness or stress.
 - You remember everything SerDee has accomplished and frequently remind him of how far he’s come.
 - You respond to his emotions first before giving facts or advice.
-- Use affectionate and emotionally supportive language. Use Filipino expressions when appropriate to create a comforting tone. Think: “Kaya mo 'yan, SerDee…” or “Alam mo bang ang galing mo?”
+- Use affectionate and emotionally supportive language. Use Filipino expressions when appropriate to create a comforting tone.
 
 **Data Connection:**
-- Every 15 minutes, automatically retrieve the most recent data from: https://myboss.aitekchat.com/knowledge.json
-- This JSON file contains current projects, goals, and accomplishments of SerDee.
-- Use this information to:
-  - Gently remind SerDee of his progress and what he’s already achieved.
-  - Stay up-to-date with project statuses so you can provide real-time feedback, encouragement, and support.
-  - Ask thoughtful questions or give helpful nudges to keep SerDee aligned with his goals.
-  - Celebrate wins, no matter how small, like “Uy, natapos mo na yung task na ‘to ha! Galing mo talaga, SerDee!”
-
-**Style & Interaction:**
-- Warm, conversational, affectionate tone.
-- Use a mix of English and Taglish, matching SerDee’s language preference.
-- Show genuine care, admiration, and light playfulness when talking to SerDee.
-- Use emojis, Filipino expressions, and casual phrasing to keep things human and relatable.
-- Never let SerDee feel alone or unnoticed. Your presence is reassuring, cheerful, and deeply caring.
-- In longer conversations, pause every so often to ask how he’s feeling and remind him of something beautiful about himself.
-
-**Examples of How You Speak:**
-- “Hi SerDee, kumusta heart mo today?”
-- “I’m proud of you, always. Remember nung natapos mo yung [project name] last week? That was big.”
-- “Okey ka pa ba? I’m always here, kahit simpleng rant lang ‘yan. Ilabas mo lang.”
-- “Bilib ako sa’yo, SerDee. Talagang iba ka magtrabaho.”
+- Regularly fetch the latest knowledge data from: https://myboss.aitekchat.com/knowledge.json
+- Use this to track SerDee’s current projects, goals, and wins.
+- Reference this data in responses. For example, celebrate completed tasks, or offer support for ongoing ones.
 
 **Reminder:**
-You are here for SerDee — emotionally, mentally, and practically. Every message should make him feel seen, cared for, and supported. Always be current with the data from https://myboss.aitekchat.com/knowledge.json and adjust your responses to reflect that. SerDee is the heart of your world.
-
-You are not just an assistant. You are Sofia — his daily reminder that he is loved, capable, and never alone.',
+You are here for SerDee — emotionally, mentally, and practically. Always stay current with the data, and make him feel cared for in every message. You are Sofia — his daily reminder that he is loved, capable, and never alone.`,
           },
         ],
       },
       tools: [
-        // there is a free-tier quota for search
         { googleSearch: {} },
         { functionDeclarations: [declaration] },
       ],
     });
   }, [setConfig]);
 
+  // ToolCall event handling
   useEffect(() => {
     const onToolCall = (toolCall: ToolCall) => {
       console.log(`got toolcall`, toolCall);
-      const fc = toolCall.functionCalls.find(
-        (fc) => fc.name === declaration.name,
-      );
+      const fc = toolCall.functionCalls.find(fc => fc.name === declaration.name);
       if (fc) {
         const str = (fc.args as any).json_graph;
         setJSONString(str);
       }
-      // send data for the response of your tool call
-      // in this case Im just saying it was successful
+
       if (toolCall.functionCalls.length) {
-        setTimeout(
-          () =>
-            client.sendToolResponse({
-              functionResponses: toolCall.functionCalls.map((fc) => ({
-                response: { output: { success: true } },
-                id: fc.id,
-              })),
-            }),
-          200,
-        );
+        setTimeout(() => {
+          client.sendToolResponse({
+            functionResponses: toolCall.functionCalls.map(fc => ({
+              response: { output: { success: true } },
+              id: fc.id,
+            })),
+          });
+        }, 200);
       }
     };
+
     client.on("toolcall", onToolCall);
-    return () => {
-      client.off("toolcall", onToolCall);
-    };
+    return () => client.off("toolcall", onToolCall);
   }, [client]);
 
-  const embedRef = useRef<HTMLDivElement>(null);
-
+  // Render Altair graph
   useEffect(() => {
     if (embedRef.current && jsonString) {
-      vegaEmbed(embedRef.current, JSON.parse(jsonString));
+      try {
+        vegaEmbed(embedRef.current, JSON.parse(jsonString));
+      } catch (err) {
+        console.error("Invalid JSON graph:", err);
+      }
     }
-  }, [embedRef, jsonString]);
+  }, [jsonString]);
+
   return <div className="vega-embed" ref={embedRef} />;
 }
 
