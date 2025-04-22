@@ -41,7 +41,7 @@ function AltairComponent() {
 
   useEffect(() => {
     setConfig({
-      model: "models/gemini-2.5-flash",
+      model: "models/gemini-2.5-flash-exp",
       generationConfig: {
         responseModalities: "audio",
         speechConfig: {
